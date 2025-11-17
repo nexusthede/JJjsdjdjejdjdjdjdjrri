@@ -14,10 +14,10 @@ const client = new Client({
 
 let data = require("./data.json");
 
-function saveData() {
-    fs.writeFileSync("./data.json", JSON.stringify(data, null, 2));
-}
+// Save function
+function saveData() { fs.writeFileSync("./data.json", JSON.stringify(data, null, 2)); }
 
+// VC tier system
 function getVCTier(minutes) {
     if (minutes >= 500) return 5;
     if (minutes >= 300) return 4;
@@ -26,10 +26,11 @@ function getVCTier(minutes) {
     return 1;
 }
 
+// Ready event
 client.once("ready", () => {
     console.log(`${client.user.tag} is online!`);
 
-    // Streaming presence, purple, no text
+    // Streaming purple presence
     client.user.setPresence({
         activities: [{
             name: "",
@@ -39,19 +40,18 @@ client.once("ready", () => {
         status: "online"
     });
 
-    // Auto leaderboard update every 5 mins
-    setInterval(updateLeaderboards, 5 * 60 * 1000);
+    // Auto-update leaderboards every 5 mins
+    setInterval(updateLeaderboards, 5*60*1000);
 });
 
+// Snipe deleted messages
 client.snipes = {};
-client.on("messageDelete", message => {
-    if(message.author.bot) return;
-    client.snipes[message.channel.id] = {
-        content: message.content,
-        author: message.author.tag
-    };
+client.on("messageDelete", msg => {
+    if(msg.author.bot) return;
+    client.snipes[msg.channel.id] = { content: msg.content, author: msg.author.tag };
 });
 
+// Message commands
 client.on("messageCreate", async message => {
     if(message.author.bot) return;
     if(!message.content.startsWith(PREFIX)) return;
@@ -60,15 +60,14 @@ client.on("messageCreate", async message => {
     const cmd = args.shift().toLowerCase();
     const member = message.member;
 
-    if(!data.points[member.id]) data.points[member.id] = 0;
-    if(!data.vc[member.id]) data.vc[member.id] = 0;
-    if(!data.chat[member.id]) data.chat[member.id] = 0;
-    data.chat[member.id] += 1;
+    // Initialize user data
+    if(!data.points[member.id]) data.points[member.id]=0;
+    if(!data.vc[member.id]) data.vc[member.id]=0;
+    if(!data.chat[member.id]) data.chat[member.id]=0;
+    data.chat[member.id] +=1;
 
-    // ----------------------
-    // Economy / Casino
-    // ----------------------
-    if(["bal","balance"].includes(cmd)) {
+    // ---------------------- Casino / Economy ----------------------
+    if(["bal","balance"].includes(cmd)){
         const balEmbed = new EmbedBuilder()
             .setTitle("Your Balance")
             .setColor(COLOR)
@@ -76,9 +75,9 @@ client.on("messageCreate", async message => {
         return message.channel.send({embeds:[balEmbed]});
     }
 
-    if(["daily","dj"].includes(cmd)) {
-        const amount = 100;
-        data.points[member.id] += amount;
+    if(["daily","dj"].includes(cmd)){
+        const amount=100;
+        data.points[member.id]+=amount;
         saveData();
         const dailyEmbed = new EmbedBuilder()
             .setTitle("Daily Reward")
@@ -87,14 +86,14 @@ client.on("messageCreate", async message => {
         return message.channel.send({embeds:[dailyEmbed]});
     }
 
-    if(cmd === "give") {
+    if(cmd==="give"){
         const target = message.mentions.members.first();
-        const amount = parseInt(args[1]);
-        if(!target || !amount || amount <=0) return message.reply("Invalid usage.");
-        if(data.points[member.id] < amount) return message.reply("Not enough points.");
-        if(!data.points[target.id]) data.points[target.id] = 0;
-        data.points[member.id] -= amount;
-        data.points[target.id] += amount;
+        const amount=parseInt(args[1]);
+        if(!target || !amount || amount<=0) return message.reply("Invalid usage.");
+        if(data.points[member.id]<amount) return message.reply("Not enough points.");
+        if(!data.points[target.id]) data.points[target.id]=0;
+        data.points[member.id]-=amount;
+        data.points[target.id]+=amount;
         saveData();
         const giveEmbed = new EmbedBuilder()
             .setTitle("Points Transferred")
@@ -104,16 +103,16 @@ client.on("messageCreate", async message => {
     }
 
     // Rob / Protect
-    if(cmd === "rob") {
+    if(cmd==="rob"){
         const target = message.mentions.members.first();
         if(!target) return message.reply("Mention someone.");
         if(data.protection[target.id]) return message.reply("Target is protected!");
-        const success = Math.random() < 0.5;
-        let amount = Math.floor(Math.random()*50)+10;
-        if(success) {
-            if(!data.points[target.id]) data.points[target.id] = 0;
-            data.points[target.id] = Math.max(0,data.points[target.id]-amount);
-            data.points[member.id] += amount;
+        const success=Math.random()<0.5;
+        let amount=Math.floor(Math.random()*50)+10;
+        if(success){
+            if(!data.points[target.id]) data.points[target.id]=0;
+            data.points[target.id]=Math.max(0,data.points[target.id]-amount);
+            data.points[member.id]+=amount;
             saveData();
             const robEmbed = new EmbedBuilder()
                 .setTitle("Rob Success")
@@ -129,8 +128,8 @@ client.on("messageCreate", async message => {
         }
     }
 
-    if(cmd === "protect") {
-        data.protection[member.id] = true;
+    if(cmd==="protect"){
+        data.protection[member.id]=true;
         saveData();
         const protectEmbed = new EmbedBuilder()
             .setTitle("Protection Activated")
@@ -139,56 +138,54 @@ client.on("messageCreate", async message => {
         return message.channel.send({embeds:[protectEmbed]});
     }
 
-    if(cmd === "disable" && args[0]==="rob") {
-        data.cooldowns = data.cooldowns || {};
-        data.cooldowns.robDisabled = true;
+    if(cmd==="disable" && args[0]==="rob"){
+        data.cooldowns=data.cooldowns||{};
+        data.cooldowns.robDisabled=true;
         saveData();
         return message.reply("Rob disabled.");
     }
-    if(cmd === "enable" && args[0]==="rob") {
-        data.cooldowns.robDisabled = false;
+    if(cmd==="enable" && args[0]==="rob"){
+        data.cooldowns.robDisabled=false;
         saveData();
         return message.reply("Rob enabled.");
     }
 
-    // ----------------------
-    // Moderation
-    // ----------------------
-    if(cmd === "clear") {
+    // ---------------------- Moderation ----------------------
+    if(cmd==="clear"){
         if(!member.permissions.has("ManageMessages")) return message.reply("No perms.");
-        const amt = parseInt(args[0]);
+        const amt=parseInt(args[0]);
         if(!amt) return message.reply("Specify amount.");
         await message.channel.bulkDelete(amt,true);
-        const clearEmbed = new EmbedBuilder()
+        const clearEmbed=new EmbedBuilder()
             .setTitle("Messages Cleared")
             .setColor(COLOR)
             .setDescription(`**${member} deleted ${amt} messages.**`);
         return message.channel.send({embeds:[clearEmbed]});
     }
 
-    if(cmd === "lock") {
+    if(cmd==="lock"){
         if(!member.permissions.has("ManageChannels")) return message.reply("No perms.");
         await message.channel.permissionOverwrites.edit(message.guild.roles.everyone,{SendMessages:false});
-        const lockEmbed = new EmbedBuilder()
+        const lockEmbed=new EmbedBuilder()
             .setTitle("Channel Locked")
             .setColor(COLOR)
             .setDescription(`**${message.channel} has been locked by ${member}.**`);
         return message.channel.send({embeds:[lockEmbed]});
     }
 
-    if(cmd === "unlock") {
+    if(cmd==="unlock"){
         if(!member.permissions.has("ManageChannels")) return message.reply("No perms.");
         await message.channel.permissionOverwrites.edit(message.guild.roles.everyone,{SendMessages:true});
-        const unlockEmbed = new EmbedBuilder()
+        const unlockEmbed=new EmbedBuilder()
             .setTitle("Channel Unlocked")
             .setColor(COLOR)
             .setDescription(`**${message.channel} has been unlocked by ${member}.**`);
         return message.channel.send({embeds:[unlockEmbed]});
     }
 
-    if(cmd === "snipe") {
+    if(cmd==="snipe"){
         if(!client.snipes[message.channel.id]) return message.reply("Nothing to snipe.");
-        const sniped = client.snipes[message.channel.id];
+        const sniped=client.snipes[message.channel.id];
         const snipeEmbed = new EmbedBuilder()
             .setTitle("Last Deleted Message")
             .setColor(COLOR)
@@ -196,12 +193,10 @@ client.on("messageCreate", async message => {
         return message.channel.send({embeds:[snipeEmbed]});
     }
 
-    // ----------------------
-    // Roles / User
-    // ----------------------
-    if(["role","r"].includes(cmd)) {
+    // ---------------------- Roles / User ----------------------
+    if(["role","r"].includes(cmd)){
         const target = message.mentions.members.first();
-        const role = message.guild.roles.cache.find(r => r.name === args.slice(1).join(" "));
+        const role = message.guild.roles.cache.find(r=>r.name===args.slice(1).join(" "));
         if(!target || !role) return message.reply("Invalid usage.");
         if([data.roles.mod,data.roles.admin,data.roles.owner].includes(role.id)) return message.reply("Cannot assign staff role.");
         await target.roles.add(role);
@@ -212,9 +207,9 @@ client.on("messageCreate", async message => {
         return message.channel.send({embeds:[addRoleEmbed]});
     }
 
-    if(["remrole","rr"].includes(cmd)) {
+    if(["remrole","rr"].includes(cmd)){
         const target = message.mentions.members.first();
-        const role = message.guild.roles.cache.find(r => r.name === args.slice(1).join(" "));
+        const role = message.guild.roles.cache.find(r=>r.name===args.slice(1).join(" "));
         if(!target || !role) return message.reply("Invalid usage.");
         if([data.roles.mod,data.roles.admin,data.roles.owner].includes(role.id)) return message.reply("Cannot remove staff role.");
         await target.roles.remove(role);
@@ -225,7 +220,7 @@ client.on("messageCreate", async message => {
         return message.channel.send({embeds:[remRoleEmbed]});
     }
 
-    if(cmd === "roles") {
+    if(cmd==="roles"){
         const target = message.mentions.members.first() || member;
         const rolesEmbed = new EmbedBuilder()
             .setTitle(`${target.user.username}'s Roles`)
@@ -234,7 +229,7 @@ client.on("messageCreate", async message => {
         return message.channel.send({embeds:[rolesEmbed]});
     }
 
-    if(cmd === "user") {
+    if(cmd==="user"){
         const target = message.mentions.members.first() || member;
         const statsEmbed = new EmbedBuilder()
             .setTitle(`${target.user.username} Info`)
@@ -249,10 +244,8 @@ client.on("messageCreate", async message => {
         return message.channel.send({embeds:[statsEmbed]});
     }
 
-    // ----------------------
-    // Help with buttons
-    // ----------------------
-    if(cmd === "help") {
+    // ---------------------- Help with buttons ----------------------
+    if(cmd==="help"){
         const helpEmbed = new EmbedBuilder()
             .setTitle("Help Menu")
             .setColor(COLOR)
@@ -260,30 +253,21 @@ client.on("messageCreate", async message => {
 
         const row = new ActionRowBuilder()
             .addComponents(
-                new ButtonBuilder()
-                    .setCustomId("cat_points")
-                    .setLabel("Points / Casino")
-                    .setStyle(ButtonStyle.Primary),
-                new ButtonBuilder()
-                    .setCustomId("cat_mod")
-                    .setLabel("Moderation")
-                    .setStyle(ButtonStyle.Success),
-                new ButtonBuilder()
-                    .setCustomId("cat_roles")
-                    .setLabel("Roles / User")
-                    .setStyle(ButtonStyle.Secondary)
+                new ButtonBuilder().setCustomId("cat_points").setLabel("Points / Casino").setStyle(ButtonStyle.Primary),
+                new ButtonBuilder().setCustomId("cat_mod").setLabel("Moderation").setStyle(ButtonStyle.Success),
+                new ButtonBuilder().setCustomId("cat_roles").setLabel("Roles / User").setStyle(ButtonStyle.Secondary)
             );
 
         return message.channel.send({embeds:[helpEmbed], components:[row]});
     }
 });
 
-// Handle .help button interactions
+// Handle help buttons
 client.on("interactionCreate", async interaction => {
     if(!interaction.isButton()) return;
     let replyEmbed = new EmbedBuilder().setColor(COLOR);
 
-    if(interaction.customId === "cat_points") {
+    if(interaction.customId==="cat_points"){
         replyEmbed.setTitle("Points / Casino Commands")
             .setDescription(`
 **.bal / .balance** → Check points
@@ -302,7 +286,7 @@ client.on("interactionCreate", async interaction => {
 **.protect** → Self-protect
 **.disable rob / .enable rob** → Toggle rob
         `);
-    } else if(interaction.customId === "cat_mod") {
+    } else if(interaction.customId==="cat_mod"){
         replyEmbed.setTitle("Moderation Commands")
             .setDescription(`
 **.clear <amt>** → Delete messages
@@ -310,7 +294,7 @@ client.on("interactionCreate", async interaction => {
 **.snipe** → Last deleted message
 **.set modrole / adminrole / ownerrole** → Staff roles
         `);
-    } else if(interaction.customId === "cat_roles") {
+    } else if(interaction.customId==="cat_roles"){
         replyEmbed.setTitle("Roles / User Commands")
             .setDescription(`
 **.role / .r @user <role>** → Add role
@@ -323,8 +307,10 @@ client.on("interactionCreate", async interaction => {
     await interaction.reply({embeds:[replyEmbed], ephemeral:true});
 });
 
-function updateLeaderboards() {
-    // VC / Chat leaderboard automatic embeds (set your channel IDs in data.json)
+// ---------------------- Leaderboards ----------------------
+function updateLeaderboards(){
+    // You can set data.channels.vc_lb / chat_lb with channel IDs and send embeds
+    // auto update every 5 mins
 }
 
 client.login(TOKEN);
