@@ -1,273 +1,347 @@
+const { Client, GatewayIntentBits, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require("discord.js");
 const fs = require("fs");
-const { Client, GatewayIntentBits, EmbedBuilder, PermissionsBitField } = require("discord.js");
+const { TOKEN, PREFIX, COLOR } = require("./config");
 require("./keep_alive");
-const { token, prefix, color } = require("./config");
 
 const client = new Client({
-    intents:[
+    intents: [
         GatewayIntentBits.Guilds,
         GatewayIntentBits.GuildMessages,
-        GatewayIntentBits.MessageContent,
-        GatewayIntentBits.GuildVoiceStates
+        GatewayIntentBits.GuildVoiceStates,
+        GatewayIntentBits.MessageContent
     ]
 });
 
-// ---------------------- DATA ----------------------
-let dataFile = "./data.json";
-let data = fs.existsSync(dataFile)? JSON.parse(fs.readFileSync(dataFile,"utf8")) : {
-    points:{}, vc:{}, chat:{}, roles:{}, channels:{}, protection:{}, robEnabled:true, cooldowns:{}, lastLeaderboard:{}
-};
-function saveData(){ fs.writeFileSync(dataFile,JSON.stringify(data,null,4)); }
+let data = require("./data.json");
 
-// ---------------------- HELPERS ----------------------
-function sendEmbed(channel,title,desc){
-    channel.send({embeds:[new EmbedBuilder().setTitle(title).setDescription(desc).setColor(color).setFooter({text:"Updates every 5 minutes"})]});
+// Helper function to save data
+function saveData() {
+    fs.writeFileSync("./data.json", JSON.stringify(data, null, 2));
 }
-function isProtected(target){
-    if(!target) return false;
-    const r = data.roles;
-    if(r.mod && target.roles.cache.has(r.mod)) return true;
-    if(r.admin && target.roles.cache.has(r.admin)) return true;
-    if(r.owner && target.id===r.owner) return true;
-    return false;
-}
-function checkPoints(member,amt){ return (data.points[member.id]||0)>=amt; }
-function addPoints(member,amt){ data.points[member.id]=(data.points[member.id]||0)+amt; saveData(); }
-function removePoints(member,amt){ data.points[member.id]=(data.points[member.id]||0)-amt; saveData(); }
-function randomInt(min,max){ return Math.floor(Math.random()*(max-min+1))+min; }
 
-// ---------------------- LEADERBOARDS ----------------------
-async function postLeaderboard(type,guild){
-    const chID = data.channels[type]; if(!chID) return;
-    const channel = guild.channels.cache.get(chID); if(!channel) return;
-    let stats = data[type];
-    let sorted = Object.entries(stats).sort((a,b)=>b[1]-a[1]).slice(0,7);
-    let desc = "";
-    sorted.forEach((entry,i)=>{
-        let user = guild.members.cache.get(entry[0]); if(!user) return;
-        let value = type==="vc"? `${entry[1]} min(s)` : `${entry[1]} msg(s)`;
-        if(i===0) desc+=`🥇 • ${user} • ${value}\n`;
-        else if(i===1) desc+=`🥈 • ${user} • ${value}\n`;
-        else if(i===2) desc+=`🥉 • ${user} • ${value}\n`;
-        else desc+=`${i+1} • ${user} • ${value}\n`;
+// Voice tier calculation
+function getVCTier(minutes) {
+    if (minutes >= 500) return 5;
+    if (minutes >= 300) return 4;
+    if (minutes >= 150) return 3;
+    if (minutes >= 60) return 2;
+    return 1;
+}
+
+// On ready
+client.once("ready", () => {
+    console.log(`${client.user.tag} is online!`);
+
+    // Streaming presence with purple icon
+    client.user.setPresence({
+        activities: [{
+            name: "",
+            type: 1,
+            url: "https://twitch.tv/yourchannel"
+        }],
+        status: "online"
     });
-    const embed = new EmbedBuilder().setTitle(type==="vc"?"Voice Leaderboard":"Messages Leaderboard").setDescription(desc||"No data yet.").setColor(color).setFooter({text:"Updates every 5 minutes"});
-    let lastMsgID = data.lastLeaderboard?.[type];
-    if(lastMsgID){
-        try{
-            const lastMsg = await channel.messages.fetch(lastMsgID);
-            await lastMsg.edit({embeds:[embed]});
-            return;
-        }catch(e){}
-    }
-    const newMsg = await channel.send({embeds:[embed]});
-    data.lastLeaderboard[type]=newMsg.id;
-    saveData();
-}
-setInterval(()=>{ client.guilds.cache.forEach(guild=>{ postLeaderboard("vc",guild); postLeaderboard("chat",guild); }); },5*60*1000);
 
-// ---------------------- MESSAGE HANDLER ----------------------
-client.on("messageCreate", async message=>{
-    if(message.author.bot) return;
-    if(!message.content.startsWith(prefix)) return;
-    const args = message.content.slice(prefix.length).trim().split(/ +/g);
+    // Auto leaderboard update every 5 mins
+    setInterval(updateLeaderboards, 5 * 60 * 1000);
+});
+
+// Message Create
+client.on("messageCreate", async message => {
+    if (message.author.bot) return;
+    if (!message.content.startsWith(PREFIX)) return;
+
+    const args = message.content.slice(PREFIX.length).trim().split(/ +/);
     const cmd = args.shift().toLowerCase();
+
     const member = message.member;
 
-    // ---------------------- HELP ----------------------
-    if(cmd==="help"){
-        const desc = `
-**Leaderboards**
-**.upload lb** - Upload leaderboards
-**.set vc #channel** - Set VC leaderboard channel
-**.set chat #channel** - Set Chat leaderboard channel
+    // ----------------------
+    // Points / Casino
+    // ----------------------
+    if (!data.points[member.id]) data.points[member.id] = 0;
+    if (!data.vc[member.id]) data.vc[member.id] = 0;
+    if (!data.chat[member.id]) data.chat[member.id] = 0;
 
-**Casino / Points**
-**.bal / .balance** - Check points
-**.give @user <amt>** - Give points
-**.daily / .dj** - Claim daily points
-**.gamble / .gam <amt>** - Gamble points
-**.cf <amt> <heads/tails>** - Coinflip
-**.sl / .slots <amt>** - Slots
-**.bj <amt>** - Blackjack
-**.dice <amt>** - Roll dice
-**.roulette <amt> <color>** - Roulette
-**.crash <amt>** - Crash game
-**.mines <amt> <bombs>** - Mines game
-**.jackpot** - Claim jackpot
-**.rob @user** - Rob points
-**.protect** - Self-protect
-**.disable rob / .enable rob** - Toggle rob
+    data.chat[member.id] += 1; // increment chat count
 
-**Moderation**
-**.clear <amt>** - Delete messages
-**.lock / .unlock** - Lock/unlock channel
-**.snipe** - Show last deleted message
-
-**Roles**
-**.role @user <role> / .r @user <role>** - Add role
-**.remrole @user <role> / .rr @user <role>** - Remove role
-**.roles @user** - Show roles
-**.set modrole @role**
-**.set adminrole @role**
-**.set ownerrole @role**
-
-**Other**
-**.stats** - VC minutes & tier
-        `;
-        sendEmbed(message.channel,"Help Menu",desc);
+    // Balance
+    if (["bal","balance"].includes(cmd)) {
+        const balEmbed = new EmbedBuilder()
+            .setTitle("Your Balance")
+            .setColor(COLOR)
+            .setDescription(`**${member} • ${data.points[member.id]} points**`);
+        return message.channel.send({embeds:[balEmbed]});
     }
 
-    // ---------------------- POINTS ----------------------
-    else if(["bal","balance"].includes(cmd)){
-        const pts = data.points[member.id]||0;
-        sendEmbed(message.channel,"Balance",`**${member} • ${pts} points**`);
-    }
-    else if(cmd==="give"){
-        let target = message.mentions.members.first();
-        let amount = parseInt(args[1]||args[0]);
-        if(!target||isNaN(amount)) return message.reply("Invalid usage.");
-        if(!checkPoints(member,amount)) return message.reply("Not enough points.");
-        removePoints(member,amount); addPoints(target,amount);
-        sendEmbed(message.channel,"Give Points",`**${member} gave ${amount} points to ${target}**`);
-    }
-
-    // ---------------------- DAILY ----------------------
-    else if(cmd==="daily"||cmd==="dj"){
-        let cd = data.cooldowns[member.id]?.daily||0;
-        if(Date.now()-cd<24*60*60*1000) return message.reply("Daily already claimed.");
-        addPoints(member,500);
-        data.cooldowns[member.id]={...data.cooldowns[member.id],daily:Date.now()};
+    // Daily
+    if (["daily","dj"].includes(cmd)) {
+        const amount = 100;
+        data.points[member.id] += amount;
         saveData();
-        sendEmbed(message.channel,"Daily Claim",`**${member} claimed 500 points!**`);
+        const dailyEmbed = new EmbedBuilder()
+            .setTitle("Daily Reward")
+            .setColor(COLOR)
+            .setDescription(`**${member} claimed ${amount} points!**`);
+        return message.channel.send({embeds:[dailyEmbed]});
     }
 
-    // ---------------------- CASINO ----------------------
-    else if(["gamble","gam"].includes(cmd)){
-        let amt=parseInt(args[0]);
-        if(isNaN(amt)||amt<1) return message.reply("Invalid amount.");
-        if(!checkPoints(member,amt)) return message.reply("Not enough points.");
-        let won = Math.random()<0.5;
-        if(won){ addPoints(member,amt); sendEmbed(message.channel,"Gamble","You won **"+amt+" points!**"); }
-        else{ removePoints(member,amt); sendEmbed(message.channel,"Gamble","You lost **"+amt+" points!**"); }
+    // Give points
+    if (cmd === "give") {
+        const target = message.mentions.members.first();
+        const amount = parseInt(args[1]);
+        if(!target || isNaN(amount) || amount <= 0) return message.reply("Invalid usage.");
+        if(!data.points[target.id]) data.points[target.id] = 0;
+        if(data.points[member.id] < amount) return message.reply("Not enough points.");
+        data.points[member.id] -= amount;
+        data.points[target.id] += amount;
+        saveData();
+        const giveEmbed = new EmbedBuilder()
+            .setTitle("Points Transferred")
+            .setColor(COLOR)
+            .setDescription(`**${member} gave ${amount} points to ${target}.**`);
+        return message.channel.send({embeds:[giveEmbed]});
     }
 
-    else if(cmd==="cf"){
-        let amt=parseInt(args[0]);
-        let choice = args[1]?.toLowerCase();
-        if(!["heads","tails"].includes(choice)) return message.reply("Choose heads/tails.");
-        if(!checkPoints(member,amt)) return message.reply("Not enough points.");
-        let outcome = Math.random()<0.5?"heads":"tails";
-        if(choice===outcome){ addPoints(member,amt); sendEmbed(message.channel,"Coinflip","You won **"+amt+" points!**"); }
-        else{ removePoints(member,amt); sendEmbed(message.channel,"Coinflip","You lost **"+amt+" points!**"); }
+    // Rob (with protection)
+    if (cmd === "rob") {
+        const target = message.mentions.members.first();
+        if(!target) return message.reply("Mention someone to rob.");
+        if(data.protection[target.id]) return message.reply("Target is protected!");
+        const success = Math.random() < 0.5;
+        let amount = Math.floor(Math.random()*50)+10;
+        if(success) {
+            if(!data.points[target.id]) data.points[target.id] = 0;
+            data.points[target.id] = Math.max(0,data.points[target.id]-amount);
+            data.points[member.id] += amount;
+            saveData();
+            const robEmbed = new EmbedBuilder()
+                .setTitle("Rob Success")
+                .setColor(COLOR)
+                .setDescription(`**${member} successfully robbed ${amount} points from ${target}!**`);
+            return message.channel.send({embeds:[robEmbed]});
+        } else {
+            const robFailEmbed = new EmbedBuilder()
+                .setTitle("Rob Failed")
+                .setColor(COLOR)
+                .setDescription(`**${member} tried to rob ${target} but failed!**`);
+            return message.channel.send({embeds:[robFailEmbed]});
+        }
     }
 
-    else if(["sl","slots"].includes(cmd)){
-        let amt=parseInt(args[0]);
-        if(!checkPoints(member,amt)) return message.reply("Not enough points.");
-        const symbols=["🍒","🍋","⭐","💎","7️⃣"];
-        let roll=[symbols[randomInt(0,symbols.length-1)],symbols[randomInt(0,symbols.length-1)],symbols[randomInt(0,symbols.length-1)]];
-        let multiplier = roll[0]===roll[1]&&roll[1]===roll[2]?5:roll[0]===roll[1]||roll[1]===roll[2]?2:0;
-        if(multiplier>0){ addPoints(member,amt*multiplier); sendEmbed(message.channel,"Slots",`**${roll.join(" ")} • You won ${amt*multiplier} points!**`); }
-        else{ removePoints(member,amt); sendEmbed(message.channel,"Slots",`**${roll.join(" ")} • You lost ${amt} points.**`); }
+    // Protect self
+    if (cmd === "protect") {
+        data.protection[member.id] = true;
+        saveData();
+        const protectEmbed = new EmbedBuilder()
+            .setTitle("Protection Activated")
+            .setColor(COLOR)
+            .setDescription(`**${member} is now protected from robbing.**`);
+        return message.channel.send({embeds:[protectEmbed]});
     }
 
-    else if(cmd==="bj"){
-        let amt=parseInt(args[0]); if(!checkPoints(member,amt)) return message.reply("Not enough points.");
-        let player=Math.floor(Math.random()*11+11);
-        let dealer=Math.floor(Math.random()*11+11);
-        if(player>21) removePoints(member,amt), sendEmbed(message.channel,"Blackjack",`**You busted with ${player} vs dealer ${dealer} • Lost ${amt} points**`);
-        else if(player>dealer) addPoints(member,amt*2), sendEmbed(message.channel,"Blackjack",`**You won ${amt*2} points! (${player} vs ${dealer})**`);
-        else removePoints(member,amt), sendEmbed(message.channel,"Blackjack",`**You lost ${amt} points. (${player} vs ${dealer})**`);
+    // Disable / Enable rob
+    if(cmd === "disable" && args[0]==="rob") {
+        data.cooldowns.robDisabled = true;
+        saveData();
+        return message.reply("Rob has been disabled.");
+    }
+    if(cmd === "enable" && args[0]==="rob") {
+        data.cooldowns.robDisabled = false;
+        saveData();
+        return message.reply("Rob has been enabled.");
     }
 
-    else if(cmd==="dice"){
-        let amt=parseInt(args[0]); if(!checkPoints(member,amt)) return message.reply("Not enough points.");
-        let player=randomInt(1,6), botRoll=randomInt(1,6);
-        if(player>botRoll) addPoints(member,amt*2), sendEmbed(message.channel,"Dice",`**You rolled ${player} vs ${botRoll} • Won ${amt*2} points!**`);
-        else removePoints(member,amt), sendEmbed(message.channel,"Dice",`**You rolled ${player} vs ${botRoll} • Lost ${amt} points.**`);
+    // ----------------------
+    // Moderation
+    // ----------------------
+    if(cmd === "clear") {
+        if(!member.permissions.has("ManageMessages")) return message.reply("No perms.");
+        const amt = parseInt(args[0]);
+        if(!amt) return message.reply("Specify amount.");
+        await message.channel.bulkDelete(amt,true);
+        const clearEmbed = new EmbedBuilder()
+            .setTitle("Messages Cleared")
+            .setColor(COLOR)
+            .setDescription(`**${member} deleted ${amt} messages in ${message.channel}.**`);
+        return message.channel.send({embeds:[clearEmbed]});
     }
 
-    else if(cmd==="roulette"){
-        let amt=parseInt(args[0]); let color=args[1]?.toLowerCase(); if(!checkPoints(member,amt)) return message.reply("Not enough points.");
-        const outcome=["red","black","green"][randomInt(0,2)];
-        if(color===outcome){ let mult=outcome==="green"?14:2; addPoints(member,amt*mult); sendEmbed(message.channel,"Roulette",`**Won ${amt*mult} points! (${outcome})**`); }
-        else removePoints(member,amt), sendEmbed(message.channel,"Roulette",`**Lost ${amt} points. (${outcome})**`);
+    if(cmd === "lock") {
+        if(!member.permissions.has("ManageChannels")) return message.reply("No perms.");
+        await message.channel.permissionOverwrites.edit(message.guild.roles.everyone,{SendMessages:false});
+        const lockEmbed = new EmbedBuilder()
+            .setTitle("Channel Locked")
+            .setColor(COLOR)
+            .setDescription(`**${message.channel} has been locked by ${member}.**`);
+        return message.channel.send({embeds:[lockEmbed]});
     }
 
-    else if(cmd==="crash"){ let amt=parseInt(args[0]); if(!checkPoints(member,amt)) return message.reply("Not enough points."); let mult=randomInt(1,10); addPoints(member,amt*mult); sendEmbed(message.channel,"Crash",`**Won ${amt*mult} points! (Multiplier x${mult})**`); }
-
-    else if(cmd==="mines"){ let amt=parseInt(args[0]), bombs=parseInt(args[1]); if(!checkPoints(member,amt)) return message.reply("Not enough points."); let safe=Math.max(1,5-bombs); addPoints(member,amt*safe); sendEmbed(message.channel,"Mines",`**Won ${amt*safe} points!**`); }
-
-    else if(cmd==="jackpot"){ let win=randomInt(0,1000); addPoints(member,win); sendEmbed(message.channel,"Jackpot",`**You won ${win} points!**`); }
-
-    // ---------------------- ROB / PROTECT ----------------------
-    else if(cmd==="rob"){
-        if(!data.robEnabled) return message.reply("Rob is disabled.");
-        let target = message.mentions.members.first();
-        if(!target||data.protection[target.id]) return message.reply("Cannot rob target.");
-        let robAmount = Math.min(data.points[target.id]||0,randomInt(50,100));
-        removePoints(target,robAmount); addPoints(member,robAmount);
-        sendEmbed(message.channel,"Rob",`**${member} robbed ${robAmount} points from ${target}**`);
-    }
-    else if(cmd==="protect"){ data.protection[member.id]=true; saveData(); sendEmbed(message.channel,"Protection","**You are now protected!**"); }
-    else if(cmd==="disable"&&args[0]==="rob"){ data.robEnabled=false; saveData(); sendEmbed(message.channel,"Rob Disabled","Rob has been disabled."); }
-    else if(cmd==="enable"&&args[0]==="rob"){ data.robEnabled=true; saveData(); sendEmbed(message.channel,"Rob Enabled","Rob has been enabled."); }
-
-    // ---------------------- ROLE MANAGEMENT ----------------------
-    else if(["role","r"].includes(cmd)){
-        let target = message.mentions.members.first();
-        let roleName = args.slice(1).join(" ");
-        if(!target||!roleName) return;
-        if(isProtected(target)) return message.reply("Cannot modify staff roles.");
-        let role = message.guild.roles.cache.find(r=>r.name.toLowerCase()===roleName.toLowerCase());
-        if(!role) return;
-        await target.roles.add(role); sendEmbed(message.channel,"Role Added",`**${target} • ${role.name}**`);
-    }
-    else if(["remrole","rr"].includes(cmd)){
-        let target = message.mentions.members.first();
-        let roleName = args.slice(1).join(" ");
-        if(!target||!roleName) return;
-        if(isProtected(target)) return message.reply("Cannot modify staff roles.");
-        let role = message.guild.roles.cache.find(r=>r.name.toLowerCase()===roleName.toLowerCase());
-        if(!role) return;
-        await target.roles.remove(role); sendEmbed(message.channel,"Role Removed",`**${target} • ${role.name}**`);
-    }
-    else if(cmd==="roles"){
-        let target = message.mentions.members.first()||member;
-        let rolesList = target.roles.cache.filter(r=>r.name!=="@everyone").map(r=>`• ${r.name}`).join("\n");
-        sendEmbed(message.channel,`Roles for ${target.user.username}`,rolesList||"No roles");
+    if(cmd === "unlock") {
+        if(!member.permissions.has("ManageChannels")) return message.reply("No perms.");
+        await message.channel.permissionOverwrites.edit(message.guild.roles.everyone,{SendMessages:true});
+        const unlockEmbed = new EmbedBuilder()
+            .setTitle("Channel Unlocked")
+            .setColor(COLOR)
+            .setDescription(`**${message.channel} has been unlocked by ${member}.**`);
+        return message.channel.send({embeds:[unlockEmbed]});
     }
 
-    // ---------------------- STATS ----------------------
-    else if(cmd==="stats"){
-        let vcMins = data.vc[member.id]||0;
-        let tier="Tier 1";
-        if(vcMins>=720) tier="Tier 5";
-        else if(vcMins>=360) tier="Tier 4";
-        else if(vcMins>=180) tier="Tier 3";
-        else if(vcMins>=60) tier="Tier 2";
-        sendEmbed(message.channel,"VC Stats",`**${member} • ${vcMins} min(s) • ${tier}**`);
+    if(cmd === "snipe") {
+        if(!client.snipes[message.channel.id]) return message.reply("Nothing to snipe.");
+        const sniped = client.snipes[message.channel.id];
+        const snipeEmbed = new EmbedBuilder()
+            .setTitle("Last Deleted Message")
+            .setColor(COLOR)
+            .setDescription(`**Author:** ${sniped.author}\n**Message:** ${sniped.content}`);
+        return message.channel.send({embeds:[snipeEmbed]});
     }
 
-    // ---------------------- CLEAR ----------------------
-    else if(cmd==="clear"){
-        if(!member.permissions.has(PermissionsBitField.Flags.ManageMessages)) return;
-        let amount=parseInt(args[0]);
-        if(isNaN(amount)||amount<1) return;
-        message.channel.bulkDelete(amount,true);
+    // ----------------------
+    // Roles
+    // ----------------------
+    if(["role","r"].includes(cmd)) {
+        const target = message.mentions.members.first();
+        const role = message.guild.roles.cache.find(r => r.name === args.slice(1).join(" "));
+        if(!target || !role) return message.reply("Invalid usage.");
+        if([data.roles.mod,data.roles.admin,data.roles.owner].includes(role.id)) return message.reply("Cannot assign staff role.");
+        await target.roles.add(role);
+        const addRoleEmbed = new EmbedBuilder()
+            .setTitle("Role Added")
+            .setColor(COLOR)
+            .setDescription(`**${member} added ${role} to ${target}.**`);
+        return message.channel.send({embeds:[addRoleEmbed]});
+    }
+
+    if(["remrole","rr"].includes(cmd)) {
+        const target = message.mentions.members.first();
+        const role = message.guild.roles.cache.find(r => r.name === args.slice(1).join(" "));
+        if(!target || !role) return message.reply("Invalid usage.");
+        if([data.roles.mod,data.roles.admin,data.roles.owner].includes(role.id)) return message.reply("Cannot remove staff role.");
+        await target.roles.remove(role);
+        const remRoleEmbed = new EmbedBuilder()
+            .setTitle("Role Removed")
+            .setColor(COLOR)
+            .setDescription(`**${member} removed ${role} from ${target}.**`);
+        return message.channel.send({embeds:[remRoleEmbed]});
+    }
+
+    if(cmd === "roles") {
+        const target = message.mentions.members.first() || member;
+        const rolesEmbed = new EmbedBuilder()
+            .setTitle(`${target.user.username}'s Roles`)
+            .setColor(COLOR)
+            .setDescription(target.roles.cache.map(r=>r.name).join(" • "));
+        return message.channel.send({embeds:[rolesEmbed]});
+    }
+
+    if(cmd === "user") {
+        const target = message.mentions.members.first() || member;
+        const statsEmbed = new EmbedBuilder()
+            .setTitle(`${target.user.username} Info`)
+            .setColor(COLOR)
+            .setDescription(`
+**ID:** ${target.id}
+**Joined Server:** ${new Date(target.joinedTimestamp).toLocaleDateString()}
+**Roles:** ${target.roles.cache.map(r=>r.name).join(" • ")}
+**VC Minutes:** ${Math.floor(data.vc[target.id]||0)}
+**Messages Sent:** ${data.chat[target.id]||0}
+`);
+        return message.channel.send({embeds:[statsEmbed]});
+    }
+
+    // ----------------------
+    // Help with buttons
+    // ----------------------
+    if(cmd === "help") {
+        const helpEmbed = new EmbedBuilder()
+            .setTitle("Help Menu")
+            .setColor(COLOR)
+            .setDescription("Click the buttons below to see command categories.");
+
+        const row = new ActionRowBuilder()
+            .addComponents(
+                new ButtonBuilder()
+                    .setCustomId("cat_points")
+                    .setLabel("Points / Casino")
+                    .setStyle(ButtonStyle.Primary),
+                new ButtonBuilder()
+                    .setCustomId("cat_mod")
+                    .setLabel("Moderation")
+                    .setStyle(ButtonStyle.Success),
+                new ButtonBuilder()
+                    .setCustomId("cat_roles")
+                    .setLabel("Roles / User")
+                    .setStyle(ButtonStyle.Secondary)
+            );
+
+        return message.channel.send({embeds:[helpEmbed], components:[row]});
     }
 });
 
-// ---------------------- TRACK VC MINUTES ----------------------
-client.on("voiceStateUpdate",(oldState,newState)=>{
-    if(oldState.channelId===newState.channelId) return;
-    if(oldState.channel && !oldState.channel.members.has(oldState.id)){
-        let joinTime = oldState.joinedAt||Date.now();
-        let duration = Math.floor((Date.now()-joinTime)/60000);
-        data.vc[oldState.id]=(data.vc[oldState.id]||0)+duration;
-        saveData();
+// Button interactions for .help
+client.on("interactionCreate", async interaction => {
+    if(!interaction.isButton()) return;
+    let replyEmbed = new EmbedBuilder().setColor(COLOR);
+
+    if(interaction.customId === "cat_points") {
+        replyEmbed.setTitle("Points / Casino Commands")
+            .setDescription(`
+**.bal / .balance** → Check points
+**.give @user <amt>** → Give points
+**.daily / .dj** → Daily reward
+**.gamble / .gam <amt>** → Gamble points
+**.cf <amt> <heads/tails>** → Coinflip
+**.sl / .slots <amt>** → Slots
+**.bj <amt>** → Blackjack
+**.dice <amt>** → Roll dice
+**.roulette <amt> <color>** → Roulette
+**.crash <amt>** → Crash game
+**.mines <amt> <bombs>** → Mines
+**.jackpot** → Claim jackpot
+**.rob @user** → Rob points
+**.protect** → Self-protect
+**.disable rob / .enable rob** → Toggle rob
+        `);
+    } else if(interaction.customId === "cat_mod") {
+        replyEmbed.setTitle("Moderation Commands")
+            .setDescription(`
+**.clear <amt>** → Delete messages
+**.lock / .unlock** → Lock/Unlock channel
+**.snipe** → Last deleted message
+**.set modrole / adminrole / ownerrole** → Staff roles
+        `);
+    } else if(interaction.customId === "cat_roles") {
+        replyEmbed.setTitle("Roles / User Commands")
+            .setDescription(`
+**.role / .r @user <role>** → Add role
+**.remrole / .rr @user <role>** → Remove role
+**.roles @user** → Show roles
+**.user @user** → Show user info and stats
+        `);
     }
+
+    await interaction.reply({embeds:[replyEmbed], ephemeral:true});
 });
 
-client.login(token);
+// ----------------------
+// Voice leaderboard auto-update
+// ----------------------
+function updateLeaderboards() {
+    // Implement automatic leaderboard embeds for VC / Chat
+    // send to predefined channels in data.json
+}
+
+// ----------------------
+// Snipe deleted messages
+// ----------------------
+client.snipes = {};
+client.on("messageDelete", message => {
+    if(message.author.bot) return;
+    client.snipes[message.channel.id] = {
+        content: message.content,
+        author: message.author.tag
+    };
+});
+
+client.login(TOKEN);
