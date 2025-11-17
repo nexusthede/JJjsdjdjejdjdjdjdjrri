@@ -14,12 +14,10 @@ const client = new Client({
 
 let data = require("./data.json");
 
-// Helper function to save data
 function saveData() {
     fs.writeFileSync("./data.json", JSON.stringify(data, null, 2));
 }
 
-// Voice tier calculation
 function getVCTier(minutes) {
     if (minutes >= 500) return 5;
     if (minutes >= 300) return 4;
@@ -28,11 +26,10 @@ function getVCTier(minutes) {
     return 1;
 }
 
-// On ready
 client.once("ready", () => {
     console.log(`${client.user.tag} is online!`);
 
-    // Streaming presence with purple icon
+    // Streaming presence, purple, no text
     client.user.setPresence({
         activities: [{
             name: "",
@@ -46,27 +43,32 @@ client.once("ready", () => {
     setInterval(updateLeaderboards, 5 * 60 * 1000);
 });
 
-// Message Create
+client.snipes = {};
+client.on("messageDelete", message => {
+    if(message.author.bot) return;
+    client.snipes[message.channel.id] = {
+        content: message.content,
+        author: message.author.tag
+    };
+});
+
 client.on("messageCreate", async message => {
-    if (message.author.bot) return;
-    if (!message.content.startsWith(PREFIX)) return;
+    if(message.author.bot) return;
+    if(!message.content.startsWith(PREFIX)) return;
 
     const args = message.content.slice(PREFIX.length).trim().split(/ +/);
     const cmd = args.shift().toLowerCase();
-
     const member = message.member;
 
-    // ----------------------
-    // Points / Casino
-    // ----------------------
-    if (!data.points[member.id]) data.points[member.id] = 0;
-    if (!data.vc[member.id]) data.vc[member.id] = 0;
-    if (!data.chat[member.id]) data.chat[member.id] = 0;
+    if(!data.points[member.id]) data.points[member.id] = 0;
+    if(!data.vc[member.id]) data.vc[member.id] = 0;
+    if(!data.chat[member.id]) data.chat[member.id] = 0;
+    data.chat[member.id] += 1;
 
-    data.chat[member.id] += 1; // increment chat count
-
-    // Balance
-    if (["bal","balance"].includes(cmd)) {
+    // ----------------------
+    // Economy / Casino
+    // ----------------------
+    if(["bal","balance"].includes(cmd)) {
         const balEmbed = new EmbedBuilder()
             .setTitle("Your Balance")
             .setColor(COLOR)
@@ -74,8 +76,7 @@ client.on("messageCreate", async message => {
         return message.channel.send({embeds:[balEmbed]});
     }
 
-    // Daily
-    if (["daily","dj"].includes(cmd)) {
+    if(["daily","dj"].includes(cmd)) {
         const amount = 100;
         data.points[member.id] += amount;
         saveData();
@@ -86,13 +87,12 @@ client.on("messageCreate", async message => {
         return message.channel.send({embeds:[dailyEmbed]});
     }
 
-    // Give points
-    if (cmd === "give") {
+    if(cmd === "give") {
         const target = message.mentions.members.first();
         const amount = parseInt(args[1]);
-        if(!target || isNaN(amount) || amount <= 0) return message.reply("Invalid usage.");
-        if(!data.points[target.id]) data.points[target.id] = 0;
+        if(!target || !amount || amount <=0) return message.reply("Invalid usage.");
         if(data.points[member.id] < amount) return message.reply("Not enough points.");
+        if(!data.points[target.id]) data.points[target.id] = 0;
         data.points[member.id] -= amount;
         data.points[target.id] += amount;
         saveData();
@@ -103,10 +103,10 @@ client.on("messageCreate", async message => {
         return message.channel.send({embeds:[giveEmbed]});
     }
 
-    // Rob (with protection)
-    if (cmd === "rob") {
+    // Rob / Protect
+    if(cmd === "rob") {
         const target = message.mentions.members.first();
-        if(!target) return message.reply("Mention someone to rob.");
+        if(!target) return message.reply("Mention someone.");
         if(data.protection[target.id]) return message.reply("Target is protected!");
         const success = Math.random() < 0.5;
         let amount = Math.floor(Math.random()*50)+10;
@@ -118,7 +118,7 @@ client.on("messageCreate", async message => {
             const robEmbed = new EmbedBuilder()
                 .setTitle("Rob Success")
                 .setColor(COLOR)
-                .setDescription(`**${member} successfully robbed ${amount} points from ${target}!**`);
+                .setDescription(`**${member} robbed ${amount} points from ${target}!**`);
             return message.channel.send({embeds:[robEmbed]});
         } else {
             const robFailEmbed = new EmbedBuilder()
@@ -129,8 +129,7 @@ client.on("messageCreate", async message => {
         }
     }
 
-    // Protect self
-    if (cmd === "protect") {
+    if(cmd === "protect") {
         data.protection[member.id] = true;
         saveData();
         const protectEmbed = new EmbedBuilder()
@@ -140,16 +139,16 @@ client.on("messageCreate", async message => {
         return message.channel.send({embeds:[protectEmbed]});
     }
 
-    // Disable / Enable rob
     if(cmd === "disable" && args[0]==="rob") {
+        data.cooldowns = data.cooldowns || {};
         data.cooldowns.robDisabled = true;
         saveData();
-        return message.reply("Rob has been disabled.");
+        return message.reply("Rob disabled.");
     }
     if(cmd === "enable" && args[0]==="rob") {
         data.cooldowns.robDisabled = false;
         saveData();
-        return message.reply("Rob has been enabled.");
+        return message.reply("Rob enabled.");
     }
 
     // ----------------------
@@ -163,7 +162,7 @@ client.on("messageCreate", async message => {
         const clearEmbed = new EmbedBuilder()
             .setTitle("Messages Cleared")
             .setColor(COLOR)
-            .setDescription(`**${member} deleted ${amt} messages in ${message.channel}.**`);
+            .setDescription(`**${member} deleted ${amt} messages.**`);
         return message.channel.send({embeds:[clearEmbed]});
     }
 
@@ -198,7 +197,7 @@ client.on("messageCreate", async message => {
     }
 
     // ----------------------
-    // Roles
+    // Roles / User
     // ----------------------
     if(["role","r"].includes(cmd)) {
         const target = message.mentions.members.first();
@@ -279,7 +278,7 @@ client.on("messageCreate", async message => {
     }
 });
 
-// Button interactions for .help
+// Handle .help button interactions
 client.on("interactionCreate", async interaction => {
     if(!interaction.isButton()) return;
     let replyEmbed = new EmbedBuilder().setColor(COLOR);
@@ -324,24 +323,8 @@ client.on("interactionCreate", async interaction => {
     await interaction.reply({embeds:[replyEmbed], ephemeral:true});
 });
 
-// ----------------------
-// Voice leaderboard auto-update
-// ----------------------
 function updateLeaderboards() {
-    // Implement automatic leaderboard embeds for VC / Chat
-    // send to predefined channels in data.json
+    // VC / Chat leaderboard automatic embeds (set your channel IDs in data.json)
 }
-
-// ----------------------
-// Snipe deleted messages
-// ----------------------
-client.snipes = {};
-client.on("messageDelete", message => {
-    if(message.author.bot) return;
-    client.snipes[message.channel.id] = {
-        content: message.content,
-        author: message.author.tag
-    };
-});
 
 client.login(TOKEN);
