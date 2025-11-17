@@ -1,5 +1,5 @@
 module.exports = {
-    token: process.env.TOKEN, // set TOKEN in Render environment
-    prefix: ".",
-    color: "#C8A2C8"
+  TOKEN: process.env.TOKEN, // This must exactly match the Render env key
+  PREFIX: ".",
+  COLOR: "#b19cd9"
 };
