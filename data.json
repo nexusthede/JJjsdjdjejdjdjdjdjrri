@@ -1,0 +1,21 @@
+{
+    "points": {},
+    "vc": {},
+    "chat": {},
+    "cooldowns": {},
+    "roles": {
+        "mod": null,
+        "admin": null,
+        "owner": null
+    },
+    "robEnabled": true,
+    "channels": {
+        "vc": null,
+        "chat": null
+    },
+    "lastDeleted": {},
+    "lastLeaderboard": {
+        "vc": null,
+        "chat": null
+    }
+}
